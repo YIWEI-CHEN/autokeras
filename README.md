@@ -1,8 +1,8 @@
-<img src="https://github.com/jhfjhfj1/autokeras/blob/master/logo.png?raw=true" alt="drawing" width="400px" style="display: block; margin-left: auto; margin-right: auto"/>
+<img src="https://github.com/keras-team/autokeras/blob/master/logo.png?raw=true" alt="drawing" width="400px" style="display: block; margin-left: auto; margin-right: auto"/>
 
-[![Build Status](https://travis-ci.org/jhfjhfj1/autokeras.svg?branch=master)](https://travis-ci.org/jhfjhfj1/autokeras)
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/620bd322918c476aa33230ec911a4301)](https://www.codacy.com/app/jhfjhfj1/autokeras?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=jhfjhfj1/autokeras&amp;utm_campaign=Badge_Grade)
-[![Coverage Status](https://coveralls.io/repos/github/jhfjhfj1/autokeras/badge.svg)](https://coveralls.io/github/jhfjhfj1/autokeras)
+[![Build Status](https://travis-ci.org/keras-team/autokeras.svg?branch=master)](https://travis-ci.org/keras-team/autokeras)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/620bd322918c476aa33230ec911a4301)](https://www.codacy.com/app/jhfjhfj1/autokeras?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=keras-team/autokeras&amp;utm_campaign=Badge_Grade)
+[![Codacy Badge](https://api.codacy.com/project/badge/Coverage/620bd322918c476aa33230ec911a4301)](https://www.codacy.com/app/jhfjhfj1/autokeras?utm_source=github.com&utm_medium=referral&utm_content=keras-team/autokeras&utm_campaign=Badge_Coverage)
 <a href="https://badge.fury.io/py/autokeras"><img src="https://badge.fury.io/py/autokeras.svg" alt="PyPI version" style="width: 125px"></a>
 
 Official Website: [autokeras.com](https://autokeras.com)
@@ -16,16 +16,17 @@ Auto-Keras provides functions to automatically search for architecture and hyper
 
 Here is a short example of using the package.
 
+```python
+import autokeras as ak
 
-    import autokeras as ak
-
-    clf = ak.ImageClassifier()
-    clf.fit(x_train, y_train)
-    results = clf.predict(x_test)
+clf = ak.ImageClassifier()
+clf.fit(x_train, y_train)
+results = clf.predict(x_test)
+```
 
 ## Cite this work
 
-Auto-Keras: Efficient Neural Architecture Search with Network Morphism.
+Auto-Keras: An Efficient Neural Architecture Search System.
 Haifeng Jin, Qingquan Song, and Xia Hu.
 [arXiv:1806.10282](https://arxiv.org/abs/1806.10282).
 
@@ -33,7 +34,7 @@ Biblatex entry:
 
     @online{jin2018efficient,
       author       = {Haifeng Jin and Qingquan Song and Xia Hu},
-      title        = {Auto-Keras: Efficient Neural Architecture Search with Network Morphism},
+      title        = {Auto-Keras: An Efficient Neural Architecture Search System},
       date         = {2018-06-27},
       year         = {2018},
       eprintclass  = {cs.LG},
@@ -51,7 +52,7 @@ You can also follow us on Twitter [@autokeras](https://twitter.com/autokeras) fo
 ## Contributing Code
 
 You can follow the [Contributing Guide](https://autokeras.com/temp/contribute/) for details.
-The easist way to contribute is to resolve the issues with the "[call for contributors](https://github.com/jhfjhfj1/autokeras/labels/call%20for%20contributors)" tag.
+The easist way to contribute is to resolve the issues with the "[call for contributors](https://github.com/keras-team/autokeras/labels/call%20for%20contributors)" tag.
 They are friendly to beginners.
  
 ## Support Auto-Keras
