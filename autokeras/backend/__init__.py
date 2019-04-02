@@ -21,6 +21,10 @@ class Backend:
         return cls.backend.ModelTrainer(**kwargs)
 
     @classmethod
+    def get_glc_trainer(cls, **kwargs):
+        return cls.backend.GLCModelTrainer(**kwargs)
+
+    @classmethod
     def classification_loss(cls, prediction, target):
         return cls.backend.classification_loss(prediction, target)
 

@@ -163,11 +163,14 @@ class DeepTaskSupervised(SearchSupervised):
             Trains a model that fits the data using the best neural architecture
         """
         validate_xy(x, y)
+        y, flags = y[:, 0], y[:, 1]
         y = self.transform_y(y)
         # Divide training data into training and validation data.
         validation_set_size = int(len(y) * Constant.VALIDATION_SET_SIZE)
         validation_set_size = min(validation_set_size, 500)
         validation_set_size = max(validation_set_size, 1)
+        import numpy as np
+        y = np.concatenate((y, flags.reshape(-1, 1)), axis=1)
         x_train, x_valid, y_train, y_valid = train_test_split(x, y,
                                                               test_size=validation_set_size,
                                                               random_state=42)

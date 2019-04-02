@@ -387,3 +387,261 @@ class BERTTrainer(ModelTrainerBase):
         """Save the trained model to disk."""
         model_to_save = self.model.module if hasattr(self.model, 'module') else self.model  # Only save the model
         torch.save(model_to_save.state_dict(), self.output_model_file)
+
+def flip_labels_C(corruption_prob):
+    '''
+    returns a matrix with (1 - corruption_prob) on the diagonals, and corruption_prob
+    concentrated in only one other entry for each row
+    '''
+    np.random.seed(1)
+
+    C = np.eye(num_classes) * (1 - corruption_prob)
+    row_indices = np.arange(num_classes)
+    for i in range(num_classes):
+        C[i][np.random.choice(row_indices[row_indices != i])] = corruption_prob
+    return C
+
+class GLCModelTrainer(ModelTrainerBase):
+    """A class that is used to train the model.
+    This class can train a Pytorch model with the given data loaders.
+    The metric, loss_function, and model must be compatible with each other.
+    Please see the details in the Attributes.
+    Attributes:
+        temp_model_path: Specify the path where temp model should be stored.
+        model: An instance of Pytorch Module. The model that will be trained.
+        early_stop: An instance of class EarlyStop.
+        optimizer: The optimizer is chosen to use the Pytorch Adam optimizer.
+        current_epoch: Record the current epoch.
+    """
+
+    def __init__(self, model, path, **kwargs):
+        super().__init__(**kwargs)
+        if self.device is None:
+            self.device = get_device()
+        self.model = model
+        if torch.cuda.device_count() > 1:
+            self.model = torch.nn.DataParallel(self.model)
+        self.model.to(self.device)
+        self.optimizer = None
+        self.early_stop = None
+        self.scheduler = None
+        self.current_epoch = 0
+        self.current_metric_value = 0
+        self.temp_model_path = os.path.join(path, 'temp_model')
+
+        # num_labels = 12345
+        # gold_fraction = 0.05
+        # num_classes = 10
+        # self.num_gold = int(len(num_labels) * gold_fraction)
+        # self.num_silver = len(num_labels) - num_gold
+        # corruption_matrix = flip_labels_C(0.5)
+        # for i in range(self.num_silver):
+        #     labels[i] = np.random.choice(num_classes, p=corruption_matrix[labels[i]])
+        # self.gold = {}
+
+    def train_model(self,
+                    lr=0.001,
+                    max_iter_num=None,
+                    max_no_improvement_num=None,
+                    timeout=None):
+        """Train the model.
+        Train the model with max_iter_num or max_no_improvement_num is met.
+        Args:
+            lr: learning rate of the traininig
+            timeout: timeout in seconds
+            max_iter_num: An integer. The maximum number of epochs to train the model.
+                The training will stop when this number is reached.
+            max_no_improvement_num: An integer. The maximum number of epochs when the loss value doesn't decrease.
+                The training will stop when this number is reached.
+        Returns:
+            A tuple of loss values and metric value.
+        """
+        if max_iter_num is None:
+            max_iter_num = Constant.MAX_ITER_NUM
+
+        if max_no_improvement_num is None:
+            max_no_improvement_num = Constant.MAX_NO_IMPROVEMENT_NUM
+
+        self.early_stop = EarlyStop(max_no_improvement_num)
+        self.early_stop.on_train_begin()
+        self._timeout = time.time() + timeout if timeout is not None else sys.maxsize
+
+        test_metric_value_list = []
+        test_loss_list = []
+        self.optimizer = torch.optim.SGD(
+            self.model.parameters(),
+            lr=lr,
+            momentum=0.9,
+            weight_decay=3e-4)
+        # self.optimizer = torch.optim.Adam(self.model.parameters())
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, max_iter_num)
+
+        # //////////////////////// train for estimation ////////////////////////
+        for epoch in range(max_iter_num):
+            self.scheduler.step()
+            self._train()
+            test_loss, metric_value = self._test()
+            self.current_metric_value = metric_value
+            print('Before retraining: {} epoch, metric: {}'.format(epoch, metric_value))
+            test_metric_value_list.append(metric_value)
+            test_loss_list.append(test_loss)
+            decreasing = self.early_stop.on_epoch_end(test_loss)
+
+
+
+        # //////////////////////// estimate C ////////////////////////
+        probs = F.softmax(self.model(V(torch.from_numpy(gold['x']).cuda(), volatile=True))).data.cpu().numpy()
+        num_classes = self.num_classes
+        C_hat = np.zeros((num_classes, num_classes))
+        for label in range(num_classes):
+            indices = np.arange(len(gold['y']))[gold['y'] == label]
+            C_hat[label] = np.mean(probs[indices], axis=0, keepdims=True)
+        self.C_hat = V(torch.from_numpy(C_hat.astype(np.float32))).cuda()
+
+        # //////////////////////// retrain with correction ////////////////////////
+        for epoch in range(max_iter_num):
+            self.scheduler.step()
+            # self._shuffle_index()
+            self._retrain()
+            test_loss, metric_value = self._test()
+            self.current_metric_value = metric_value
+            print('Retraining: {} epoch, metric: {}'.format(epoch, metric_value))
+            test_metric_value_list.append(metric_value)
+            test_loss_list.append(test_loss)
+            decreasing = self.early_stop.on_epoch_end(test_loss)
+
+            if self.early_stop.no_improvement_count == 0:
+                self._save_model()
+
+            if not decreasing:
+                if self.verbose:
+                    print('\nNo loss decrease after {} epochs.\n'.format(max_no_improvement_num))
+                self._load_model()
+                break
+
+        last_num = min(max_no_improvement_num, max_iter_num)
+        return (sum(test_loss_list[-last_num:]) / last_num,
+                sum(test_metric_value_list[-last_num:]) / last_num)
+
+    def _retrain(self):
+        self.model.train()
+        self.model.init_weights()
+        loader = self.train_loader
+        self.current_epoch += 1
+
+        if self.verbose:
+            progress_bar = self.init_progress_bar(len(loader))
+        else:
+            progress_bar = None
+
+        for batch_idx, (inputs, targets) in enumerate(deepcopy(loader)):
+            if time.time() >= self._timeout:
+                raise TimeoutError
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            targets, corruptive_flags = targets[:, :-1], targets[:, -1]
+            self.optimizer.zero_grad()
+
+            inputs, targets = V(torch.FloatTensor(inputs).cuda()), \
+                               V(torch.from_numpy(targets).long().cuda())
+            loss = 0.0
+            for input, target, flag in zip(inputs, targets, corruptive_flags):
+                if flag == 1:
+                    output_s = self.model(input)
+                    pre1 = self.C_hat.t()[torch.cuda.LongTensor(target.data)]
+                    pre2 = torch.mul(F.softmax(output_s), pre1)
+                    loss += -(torch.log(pre2.sum(1))).sum(0)
+                else:
+                    output_g = self.model(data_g)
+                    loss += F.cross_entropy(output_g, target.data, size_average=False)
+
+            loss /= batch_size
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            if self.verbose:
+                if batch_idx % 10 == 0:
+                    progress_bar.update(10)
+        if self.verbose:
+            progress_bar.close()
+
+    def _train(self):
+        """Where the actual train proceed."""
+        self.model.train()
+        loader = self.train_loader
+        self.current_epoch += 1
+
+        if self.verbose:
+            progress_bar = self.init_progress_bar(len(loader))
+        else:
+            progress_bar = None
+
+
+        for batch_idx, (inputs, targets) in enumerate(deepcopy(loader)):
+            if time.time() >= self._timeout:
+                raise TimeoutError
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            targets, corruptive_flags = targets[:, :-1], targets[:, -1]
+            self.optimizer.zero_grad()
+            outputs = self.model(inputs)
+            loss = self.loss_function(outputs, targets)
+            loss.backward()
+            self.optimizer.step()
+            if self.verbose:
+                if batch_idx % 10 == 0:
+                    progress_bar.update(10)
+        if self.verbose:
+            progress_bar.close()
+
+    def _test(self):
+        """Function for evaluation."""
+        self.model.eval()
+        test_loss = 0
+        all_targets = []
+        all_predicted = []
+        loader = self.test_loader
+
+        if self.verbose:
+            progress_bar = self.init_progress_bar(len(loader))
+        else:
+            progress_bar = None
+
+        with torch.no_grad():
+            for batch_idx, (inputs, targets) in enumerate(deepcopy(loader)):
+                if time.time() >= self._timeout:
+                    raise TimeoutError
+                inputs, targets = inputs.to(self.device), targets.to(self.device)
+                targets, corruptive_flags = targets[:, :-1], targets[:, -1]
+                outputs = self.model(inputs)
+                # cast tensor to float
+                test_loss += float(self.loss_function(outputs, targets))
+
+                all_predicted.append(outputs.cpu().numpy())
+                all_targets.append(targets.cpu().numpy())
+                if self.verbose:
+                    if batch_idx % 10 == 0:
+                        progress_bar.update(10)
+
+        if self.verbose:
+            progress_bar.close()
+
+        all_predicted = reduce(lambda x, y: np.concatenate((x, y)), all_predicted)
+        all_targets = reduce(lambda x, y: np.concatenate((x, y)), all_targets)
+        return test_loss, self.metric.compute(all_predicted, all_targets)
+
+    def _save_model(self):
+        torch.save(self.model.state_dict(), self.temp_model_path)
+
+    def _load_model(self):
+        self.model.load_state_dict(torch.load(self.temp_model_path))
+
+    def init_progress_bar(self, loader_len):
+        return tqdm(total=loader_len,
+                    desc='Epoch-'
+                         + str(self.current_epoch)
+                         + ', Current Metric - '
+                         + str(self.current_metric_value),
+                    file=sys.stdout,
+                    leave=False,
+                    ncols=100,
+                    position=0,
+                    unit=' batch')

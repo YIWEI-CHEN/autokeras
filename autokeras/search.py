@@ -162,7 +162,7 @@ class Searcher(ABC):
             self.sp_search(graph, other_info, model_id, train_data, test_data)
         else:
             # Use two processes
-            self.mp_search(graph, other_info, model_id, train_data, test_data)
+            self.sp_search(graph, other_info, model_id, train_data, test_data)
 
     def mp_search(self, graph, other_info, model_id, train_data, test_data):
         ctx = mp.get_context()
@@ -347,7 +347,7 @@ def train(q, graph, train_data, test_data, trainer_args, metric, loss, verbose, 
     """Train the neural architecture."""
     try:
         model = graph.produce_model()
-        loss, metric_value = Backend.get_model_trainer(model=model,
+        loss, metric_value = Backend.get_glc_trainer(model=model,
                                                        path=path,
                                                        train_data=train_data,
                                                        test_data=test_data,
